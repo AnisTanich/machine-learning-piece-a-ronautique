@@ -1,0 +1,216 @@
+---
+title: "Untitled"
+author: "Anis Tanich"
+date: '2022-07-01'
+output: html_document
+---
+
+
+
+On récupere le fichier csv d'une mesure
+```{r setup, include=FALSE}
+data_mean_sd <- read.csv2(file.choose(),sep=";", header = TRUE) # attention si le fichier contient un séparateur ou si le fichier a un header
+#df <- as.data.frame(t(df)) #lorsque tu utilise tout le spectre il faut executé cette commande
+
+
+data_mean_sd
+```
+
+
+
+##############################################################################################################################################################################################################################
+
+                                                                            Création de outliers version pics 
+
+##############################################################################################################################################################################################################################
+
+
+ 
+# Cette fonction prend en prametre un tableau ("tab") avec en ligne les pièces et en colonne les frq ,un parametre "nb_pics" (nb de pics qu'on souhaite modifier) ,un parametre "frq" et "sd_frq" qui definissent la moyenne et l'ecart type de la gaussienne qui definit le decalage .   
+
+```{r}
+outlier_pic <- function(tab,nb_pics,frq,sd_frq){
+  alea <- sample(x = 1:length(colnames(tab)),size = nb_pics)
+  seq_frq <- rnorm(nb_pics, mean = frq , sd = sd_frq)
+  for(i in 1:length(rownames(tab))){
+    tab[i,alea] <-  tab[i,alea]+ seq_frq
+  }
+  return(tab)
+} 
+
+
+test <- outlier_pic(df[,-1],3,70,25)
+test
+```
+ 
+ 
+#Cette fonction crée des outliers, ici frq et sd_frq sont des vecteurs on va donc gerener des pics suivant une loi normal centre en frq et ecart type "sd_frq" , le parametre "nb_outliers definit le nombre outliers qu'on souhaite
+#Dans notre cas les frq sont les frq minimum et maximum des 24 parts et sd et ecarts moyen de toute les parts
+```{r}
+
+outlier_pic_vect <- function(nb_outliers,vect_min_frq,vect_max_frq,vect_sd_frq){
+ 
+  
+  outlier_part <- data.frame()
+ 
+  for(i in 1:nb_outliers){
+    pics_out <- c()
+    x = sample(x= 1:length(vect_max_frq),size = sample(x = 1:(length(vect_max_frq)-1),size = 1),replace=FALSE) # On recuperer un sous echantillons de taille aleatoire uniformement 
+    pics_out <- append(pics_out,vect_min_frq[x])
+    pics_out <- append(pics_out,vect_max_frq[-x])
+    pics_out <- sort(pics_out)
+    pics_out <- rnorm(length(pics_out),pics_out,vect_sd_frq) # on cree un vecteur suivant une loi normale centre en frq des valeurs max ou min et d'ecart type sd = sd(24 pièces)
+    
+    outlier_part <- rbind(outlier_part,pics_out)
+  }
+  colnames(outlier_part) <- colnames(vect_max_frq) 
+  return(outlier_part)
+} 
+
+
+test <- outlier_pic_vect(8,as.matrix(data_mean_sd[1,-1]),as.matrix(data_mean_sd[2,-1]),as.matrix(data_mean_sd[3,-1]))
+
+
+
+test
+
+outlier_pic_vect2 <- function(nb_outliers,vect_min_frq,vect_max_frq,vect_sd_frq){
+ 
+  
+  outlier_part <- data.frame()
+ 
+  for(i in 1:nb_outliers){
+    x = runif(1,0,1)
+    if( x >= 0.5){ pics_out <- rnorm(length(vect_max_frq),vect_max_frq,vect_sd_frq) }
+    if(x < 0.5){{ pics_out <- rnorm(length(vect_min_frq),vect_min_frq,vect_sd_frq) }}
+    outlier_part <- rbind(outlier_part,pics_out)
+  }
+  colnames(outlier_part) <- colnames(vect_max_frq) 
+  return(outlier_part)
+} 
+
+test <- outlier_pic_vect2(8,as.matrix(data_mean_sd[1,-1]),as.matrix(data_mean_sd[2,-1]),as.matrix(data_mean_sd[3,-1]))
+
+```
+ 
+ 
+ 
+ 
+ 
+ 
+
+Addaptative sampling : récupérer les localisation des intervalles de plus grande variations et echantillonnés dessus 
+```{r}
+coif_weight_spectra <- function(spectre,pas,frq){
+  poid <-c()
+  a <- c()
+  b <-c()
+  
+  for (i in 1:trunc((max(frq))/pas)) {
+    if(!is.na(var(spectre[(pas*(i-1)):(pas*i)]) ))
+    {
+    poid[i] <- var(log(spectre[(pas*(i-1)):(pas*i)]))
+    a[i] <- pas*(i-1)
+    b[i] <- pas*i
+    }
+  
+  }
+  poid_normaliser <- poid/sum(poid)
+  return(poid_normaliser)
+}
+
+coef_poids <- coif_weight_spectra(df$AvgP,500,df$Frq)
+
+max(coef_poids)
+#################################################################################################################################################################
+x=runif(1,0,1)
+for(i in 1:1000){
+  which(coef_poids > runif(1,0.00,1.00) )
+#Sample data suivant les poids :
+}
+#réflechir à crée une fonction qui trace des points
+
+
+```
+ 
+
+ 
+ 
+```{r}
+
+outlier_spectre <- function(tab_spectre){
+  
+  part_gen <- tab_spectre
+  for(i in 1:length(colnames(tab_spectre))){
+      nb <- sample(x = 1:24 ,size = 1)
+      alea <- sample(x = 1:length(colnames(tab_spectre)),size=nb)
+      part_gen[,i] <- sum(tab_spectre[,alea])/nb
+    
+  }
+  return(part_gen)
+}
+
+data_generer_spectre = outlier_spectre(df)
+data_generer_spectre
+#plot_ly( x =  tab$Frq, y =  data_generer_spectre$Part.1[1:63999], type = 'scatter', mode = 'lines' ,name ="Smoothing Spectra")%>%layout(title = "Polynome",xaxis = list(title = "Frequency"), yaxis = list(title = "Amplitude (Pa)")) 
+
+```
+ 
+```{r}
+library(plotly)
+outlier_spectre2 <- function(tab_spectre){
+  
+      part_gen <- c()
+      nb <- sample(x = 1:24 ,size = 1)
+      alea <- sample(x = 1:length(colnames(tab_spectre)),size=nb)
+      part_gen <- rowSums(tab_spectre[,alea])/nb
+    
+  
+  return(part_gen)
+}
+
+
+data_generer_spectre2 = outlier_spectre2(df)
+
+plot_ly( x =  tab$Frq, y =  log(data_generer_spectre2[1:63999]), type = 'scatter', mode = 'lines' ,name ="Smoothing Spectra")%>%layout(title = "Polynome",xaxis = list(title = "Frequency"), yaxis = list(title = "Amplitude (Pa)")) 
+```
+
+ 
+ 
+```{r}
+lst_pics <- c(3981.445,5749.512,5893.066	,6840.82,7962.891	,8942.871	,11992.676	,14458.008	,15436.523	,16659.668	,16814.941,	17724.609,18200.684)
+#Mettre les valeurs moyennes 
+
+
+
+decalage_spectre <- function(frq,spectre,lst_pics){
+  pic <- lst_pics[sample(1:length(lst_pics),size = sample(x = 1:length(lst_pics) , size = 1),replace = FALSE)]
+  print(pic)
+  for (i in 1:length(pic)) {
+    tmp <- which(trunc(pic[i]) == trunc(frq))
+    epsilon <- trunc(rnorm(1,75,25))
+    tmp1 <- spectre[(tmp-epsilon):(tmp+epsilon)]
+    spectre[(tmp-epsilon):(tmp+epsilon)] <- spectre[(tmp+epsilon):(tmp+3*epsilon)]
+    spectre[(tmp+epsilon):(tmp+3*epsilon)] <- tmp1
+  }
+
+  
+  return(spectre)
+}
+
+spectre_outlier = decalage_spectre(tab$Frq,df$Part.1,lst_pics = lst_pics)
+
+
+plot_ly( x =  tab$Frq, y =  log(df$Part.1[1:63999]), type = 'scatter', mode = 'lines' ,name ="Smoothing Spectra")%>%layout(title = "Polynome",xaxis = list(title = "Frequency"), yaxis = list(title = "Amplitude (Pa)")) 
+```
+ 
+ 
+```{r}
+plot_ly( x =  tab$Frq, y =  log(spectre_outlier[1:63999]), type = 'scatter', mode = 'lines' ,name ="Smoothing Spectra")%>%layout(title = "Polynome",xaxis = list(title = "Frequency"), yaxis = list(title = "Amplitude (Pa)")) 
+
+```
+ 
+```{r}
+write.table(test , file="R:/R&D/2-Anis Tanich/R-LNE/Analyse Machine Learning/reunion  RUS 13-07-22 NASSIM/outlier 24 parts ( pics et spectres)/outlier4_pics_8parts.xls", quote=TRUE,dec=",", row.names=FALSE, col.names=TRUE, sep ="\t", qmethod = c("escape"))
+```
+

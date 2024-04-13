@@ -1,0 +1,576 @@
+---
+title: "Recherche max"
+output: html_document
+date: '2022-03-22'
+---
+
+## #Liste des fonctions et leurs explications.
+
+1.  **nettoyage_fichier(data =df)** réordonne le fichier reçu de la mathode RUS ( suppresion des lignes vides) et création d'une colonne AVG
+
+2.  **Graph_pic_ref(df,Avg,peaksRef)**, cet algorithme affiche le graphique du spectre et des pics maximum trouvé.df="data frame comprenant en 1er colonne les amplitude et 2ème colonne les fréquences; "Avg" = colonne des fréquences;peaks ref ="un data comprenant les amplitudes et les fréquences des pics de résonnances trouver par l'algorithme de recherche pic"
+
+3.  **Rech_max_local(start,pas,mesure,frq)** Cette fonction permet de chercher des maximum sur n intervalles paramatré par n = max(Frq)/pas puis sur chaque intervalles nous prenons 1 max . on finale nous nous retrouvons avec plusieurs maximum le long des différentes plages de Frq.On réitere cette étape en changant la longueur de l'intervalle/ le paramatre start="indique à partir de quel fréquence chercher",pas="vecteur contenant les différentes longueurs d'intervalle pour la recherche de pics",mesure ="le vecteur d'amplitude du spectre",frq="le vecteur de fréquence du spectre"
+
+4.  **fauxPics_intervalles(df_frq_max_pic,df_ampl,df_indx_intervalle_pic,pas)** cette fonction vérifie les intervalles d'amplitudes moyenne d'un pics à gauche et à droite,si un des intervalles situé à droite ou à gauche est au dessus de l'amplitude moyenne du pics alors ce n'est pas un vrai pic.
+
+5.  **fauxpics_par_seuil(df,df_pic,seuil)** cette fonction supprime tout les pics au dessus d'un seuil de tolérance paramétré par le paramètre seuil ,par défaut il est définit par la moyenne des amplitude du spectre.
+
+6.  **fauxPics_points(frq_pic,ampl_pic,df_frq,df_ampl)** Ici, le seuil pour vérifier si deux pics ne sont pas en réalité le même est de 15Hz (arbitraire) Le seuil de tolérance de teta vaut la moyenne des amplitudes entre les deux pics soupçonnée Si l'amplitude du plus petit pic est inférieure à la moyenne des points entre les pics cela indique qu'ils y'a une crevasse et donc potentiellement deux pic séparé J'ai mis un seuil de teta à 3\* le mean entre les deux pics. (pour obtenir de meilleurs crevasse)
+
+7.  **supprimeFauxPics(tab,df,mesure)** cette fonction reproduit simplement la fonction fauxPics_points
+
+8.  **recup_nb_max(n,df_pic)** récupere le un nombre de pics souhaiter avec le paramètre n et df_pics est le data_frame contenant tout les pics trouvé.
+
+9.  **reduce_noise(spectre,frq)** cette fonction réduit le bruit et corrige les lignes bases, à utiliser pour une meilleur recherche des pics, elle prend en paramètre spectre="vecteur amplitudes du spectre" et frq="vecteur de frq du spectre"
+
+10. **multi_recherche_max_local(df,start,pas,mesure,seuil)** cette fonction est la seul fonction qui nécessite de réntré les paramètre ,elle utilise toutes les fonctions précédentes,le paramètre df ="data frame comprenant l'amplitude et la frq du spectre à analyser",start="la frq à partir de laquel on recherche les pics",pas ="vecteur contenant les différentes longueurs d'intervalle pour la recherche de pics",mesure="vecteur amplitude du spectre",seuil="seuil de tolérance en amplitude pour les pics à chercher".
+
+11. **recup_region_pics(data,low_frq,median_frq,hight_frq)** cette fonction récupère des pics dans différentes région grâce au paramètre low_frq,median_frq et hight_frq
+
+**#Library**
+
+```{r}
+library(plotly)
+library(tidyr)
+library(baseline)
+library(plotly)
+library("tidyverse")
+library(ggplot2)
+library(knitr)
+library(yaml) 
+library(htmlwidgets)
+
+
+```
+
+## Section choix du fichier d'entrée
+
+########################################################################################################################################################################################### 
+
+*#Un exemple de comment doit être le fichier d'entrée. (Choix 1)*
+
+```{r pressure, echo=FALSE, fig.cap="A caption", out.width = '100%'}
+knitr::include_graphics("pièces.png")
+```
+
+#Un exemple de comment doit être le fichier d'entrée.(Choix 2)
+
+```{r pressure, echo=FALSE, fig.cap="A caption", out.width = '20%'}
+knitr::include_graphics("pièce.png")
+```
+
+#Ici, vous récupérez votre fichier
+
+```{r setup, include=FALSE}
+df <- read.csv2(file.choose(),sep = ";", header = TRUE) #attention au type de séparateur et ,quote = '"' , Header
+df
+
+```
+
+#À exécuter que si votre choix de fichier est le choix 1 sinon continuer.
+
+#Traitement des données reçu : suppression des lignes vides et ajouts d'une colonne AVG pour les acquisitions
+
+```{r}
+nettoyage_fichier <- function(df) {
+    ###########################################################################
+    names(df)[match("X",names(df))] <- "Frq" # Change le nom de la colonne
+    indx = which(df$Frq == "" ) # Cherche les index des ligne contenant ""
+    df=df[-c(indx), ] # Supprimer les lignes du fichier contenant ""
+    
+    ###########################################################################
+    #Le fichier recuperé est sous forme de caractères ,on va donc transformer les données en numerique.
+    convert_str_num <-function(df){
+      for(i in 1:length(df[1,])){
+        df[,i] <- as.numeric(df[,i])
+      }
+      return(df)
+    }
+    df <- convert_str_num(df)
+    ###########################################################################
+    #Rajoue un vecteur moyenne des 30 mesures  au dataframe
+    moyP1 <-c()
+    for (i in 1:length(df[,1])) {
+      moyP1[i] <-mean(as.numeric(df[i,c(2:length(colnames(df)))]))
+    }
+    df <- cbind(df,"AvgP"= moyP1)
+    ############################################################################
+  return(df)
+}
+df <- nettoyage_fichier(df)
+
+
+attach(df)
+head(df)
+
+```
+
+#Fonction à exécuter peut importe votre choix
+
+```{r}
+library(baseline)
+reduce_noise <- function(spectre,frq){
+  bc.irls <- baseline(t(as.matrix(log(spectre))),method = "irls")
+  spectre_baseline <- t(as.matrix(bc.irls@corrected))
+  spectre_baseline <-  spectre_baseline - mean(spectre_baseline)
+  spectre_baseline[spectre_baseline < 0 ] <- 0
+  df_corriger <- data.frame( Frq = frq[1:length(spectre_baseline)] , AvgP =  spectre_baseline )
+  
+  return(df_corriger)
+  
+}
+
+df_corriger <- reduce_noise(df$AvgP,df$Frq)
+
+```
+
+::: {#overview .illustration key="1" style="color:red;font-weight: bold;"}
+**Variables globales :** Cette section doit être paramètrée avant d'éxecuter le reste du programme !
+:::
+
+**Variables globales**
+
+1.  **paramètre "n"** défini comme le nombre de pics à extraire
+
+2.  **paramètre "region_low"** défini le nombre de pics souhaité entre 0-20kHz
+
+    remarque le nombre ne doit pas dépasser "n"
+
+3.  **paramètre "region_median**" défini comme le nombre de pics souhaité entre 20-40kHz
+
+4.  **paramètre "region_hight"** défini comme le nombre de pics souhaité entre \>40kHz
+
+5.  **paramètre "seuil"** défini comme un seuil de bruit pour l'algorithme de recherche qui cherchera au-dessus de ce seuil. Par défaut seuil = moyenne de toute les amplitudes.
+
+6.  **paramètre "tmp"** défini un vecteur contenant les tailles d'intervalles de recherche de pics
+
+7.  **paramètre "file_pics"** défini le chemin du dossier ou sera sauvegardé votre data frame
+
+8.  **paramètre "start"** défini la fréquence à partir de laquelle nous pouvons rechercher les pics
+
+```{r}
+n = 20
+region_low =  10 
+region_median = 5 
+region_hight = 5
+start = 2000
+file_pics = "R:/R&D/2-Anis Tanich/R-LNE/Algorithme -LNE-RUS Anis Tanich/test/test_pics.xls"
+file_region_pics = "R:/R&D/2-Anis Tanich/R-LNE/Algorithme -LNE-RUS Anis Tanich/test/test_region_pics.xls" #attention il faut mettre des "/"
+seuil = mean(df_corriger$AvgP) 
+tmp =seq(10,100,10) 
+```
+
+::: {.illustration key="1" style="color:red;font-weight: bold;"}
+Fin de section !
+:::
+
+### **Le reste des fonctions peuvent être éxecuter simplement**
+
+#Fonction qui contrôle l'affichage graphique
+
+```{r message=TRUE, warning=TRUE}
+
+
+ 
+
+Graph_pic_ref <- function(df,Avg,peaksRef) {
+  t <- list(
+  family = "sans serif",
+  size = 14,
+  color = toRGB("grey50"))
+                                                                                            
+  plot_ly(data = df, x = ~ Frq, y = ~ Avg, type = 'scatter', mode = 'lines' ,name ="AVG")%>%
+  #add_trace(data=peaksRef, x = ~ Frq.Max.Pics, y= ~ Ampl.Max.Pics,  
+           # name = 'Pic Ref', type = 'scatter', mode = 'markers') %>%
+   add_segments(
+              x = ~ peaksRef$Frq.Max.Pics, y = 0,
+              xend = ~ peaksRef$Frq.Max.Pics, yend = ~ peaksRef$Ampl.Max.Pics, 
+              color = I("green"), showlegend = FALSE
+            )%>%
+   add_annotations(x = ~ peaksRef$Frq.Max.Pics,
+                  y = ~ peaksRef$Ampl.Max.Pics,
+                  text = as.character(trunc(peaksRef$Frq.Max.Pics)),
+                  xref = "x",
+                  yref = "y",
+                  showarrow = TRUE,
+                  arrowhead = 4,
+                  arrowsize = .5,
+                  ax = 20,
+                  ay = -40)%>%
+       
+  layout(title = "Spectre",xaxis = list(title = "Frequency"), yaxis = list(title = "Amplitude (Pa)"))  
+  
+}
+
+
+
+```
+
+#Fonction qui recherche les pics
+
+```{r message=FALSE, warning=FALSE}
+
+
+#Taille d'un intervalles = pas ( exemple pas de 35 => une recherche sur des intervalles de tailles 50Hz)
+#start indique à partir de combien de Hz on cherche nos maximum ( avant 2000 Hz on remarque que ce sont de faux pique à ne pas prendre en considération)
+Rech_max_local <- function(start,pas,mesure,frq){
+    
+  lst_Ampt_max <-c() #enregistre les amplitudes maximum (les pic)
+  lst_Frq_max <-c() # enregistre les fréquences associés aux pics
+  Intervalle_Seuil <- 0 # Cette constante ce situe au dessus du bruit pour ne rechercher que les pic au dela .
+  seuil_bruit <-  4*mean(mesure)#(0.5)*mean(mesure) #(0.5)*mean(mesure) ou ancien parametre : (0.5) mean(mesure) pieces safran
+  #Construction des intervalles de seuil 
+  x_1 <- c()
+  x_2 <- c()
+  y <- c()
+  #Construction intervalles des pics max
+  x1_max <- c()
+  x2_max <- c()
+  
+  
+  
+  # On prend la partie entière du (max des Frq diviser par le pas) pour obtenir une subdivision des frq
+  #print("je suis dans la recherche des max")
+  for(i in 1:trunc((max(frq)-start)/pas)-1){ 
+
+   
+   if((start+pas*(i+1)) < length(frq)){
+
+    Ampt_ref  <- max(mesure[(start+pas*i):(start+pas*(i+1))])
+    #print(c("tout les Ampt ref =",Ampt_ref))
+    
+    Intervalle_Seuil <- (0.5)*mean(mesure[(start+pas*i):(start+pas*(i+1))]) #ancien parametre : 2*mean(mesure[(start+pas*i):(start+pas*(i+1))])
+    x_1[i] <- frq[(start+pas*i)]
+    x_2[i] <- frq[(start+pas*(i+1))]
+    y[i] <- Intervalle_Seuil+seuil_bruit
+    lst_indexFrq <- which(mesure == max(mesure[(start+pas*i):(start+pas*(i+1))]) )
+    
+    for(j in 1:length(lst_indexFrq)) {
+      if(lst_indexFrq[j] >= (start+pas*i) & lst_indexFrq[j] <= (start+pas*(i+1)) ) {
+        indexFrq <- lst_indexFrq[j]
+      }
+    }
+
+    
+         
+    #print(c("seuil bruit=",seuil_bruit,"Intervalle seuil=",Intervalle_Seuil,"Ampt ref =",Ampt_ref))
+    if( Ampt_ref > (seuil_bruit + Intervalle_Seuil) ){
+      #print(c("BINGO",Ampt_ref))
+      x1_max[i] <- (start+pas*i)
+      x2_max[i] <- (start+pas*(i+1))
+      lst_Ampt_max[i] <- Ampt_ref
+      lst_Frq_max[i]   <- frq[indexFrq]
+     # print(lst_Frq_max[i] )
+    }
+    
+
+   }
+  }
+  
+  df_intervalles <-data.frame("x_1" = x_1," x_2" = x_2, "y" = y)
+  lst_Ampt_max = lst_Ampt_max[!is.na(lst_Ampt_max)]
+  lst_Frq_max =  lst_Frq_max[!is.na(lst_Frq_max)]
+  df_max <- data.frame("Frq Max Pics" = lst_Frq_max ,"Ampl Max Pics" = lst_Ampt_max )
+  df_indx_max <- data.frame("indx1" = x1_max,"indx2"= x2_max) #pb la de la fonction intervalle"
+  df_indx_max =na.omit(df_indx_max)
+  lst <- list(df_max,df_intervalles,df_indx_max)
+  return(lst)
+}
+
+
+```
+
+#Nettoyage pics par intervalles voisins
+
+```{r}
+
+
+
+
+fauxPics_intervalles <- function(df_frq_max_pic,df_ampl,df_indx_intervalle_pic,pas){
+
+  indx1 <- df_indx_intervalle_pic[,1]
+  indx2 <- df_indx_intervalle_pic[,2]
+  
+    for(i in 1:(length(df_indx_intervalle_pic))){
+
+        pas=pas+1
+      
+        if(mean(df_ampl[(indx1[i]-pas):(indx2[i]-pas)]) > mean(df_ampl[(indx1[i]):(indx2[i])]) | mean(df_ampl[(indx1[i]+pas):(indx2[i]+pas)]) > mean(df_ampl[(indx1[i]):(indx2[i])]) ){
+          df_frq_max_pic <- df_frq_max_pic[-i,]
+        }
+        
+   }      
+  return(df_frq_max_pic)
+}
+
+
+
+```
+
+#Nettoyage des pics par seuil
+
+```{r}
+fauxpics_par_seuil <-function(df,df_pic,seuil){
+  
+  ampl_pic <- df_pic[,2]
+  for (i in 1:length(df_pic[,2])) {
+    if(ampl_pic[i] < seuil){
+      df_pic <- df_pic[-i,]
+    }
+    
+  }
+  return(df_pic)
+}
+
+```
+
+#Nettoyage des pics par points medians
+
+```{r}
+
+
+fauxPics_points <- function(frq_pic,ampl_pic,df_frq,df_ampl){
+
+  for(i in 1:(length(df_ampl)-1)){
+   
+    if(!is.na(frq_pic[i]) & !is.na(frq_pic[i+1 ])){
+       if(abs(frq_pic[i]-frq_pic[i+1]) < 150 & frq_pic[i] != frq_pic[i+1]  ) {
+           
+         
+          index_pic1 <- match(frq_pic[i],frq_pic)
+          index_pic2 <- match(frq_pic[i+1],frq_pic)
+          min_pic <- min(ampl_pic[index_pic1],ampl_pic[index_pic2])
+          min_indx = which(ampl_pic == min_pic) #Je recupere les/le index de l'amplitude/s la plus petite
+          df_indx_pic1 <- match(frq_pic[i],df_frq)
+          df_indx_pic2 <- match(frq_pic[i+1],df_frq)
+          teta2 = 3*mean(df_ampl[(df_indx_pic1):(df_indx_pic2)])
+
+          
+          if(min_pic < teta2) {
+            frq_pic=frq_pic[-min_indx]
+            ampl_pic=ampl_pic[-min_indx]
+          }
+      
+      }
+    }
+
+  }
+    peaksRef <- data.frame("Frq Max Pics"= frq_pic,"Ampl Max Pics"=ampl_pic)
+    return(peaksRef)
+
+}
+
+
+```
+
+#Fonction pour répeter la fonction faux pics
+
+```{r}
+supprimeFauxPics <- function(tab,df,mesure){ 
+  tmp1 <- 0
+  tmp2 <- 1
+
+  tab1=fauxPics_points(tab$Frq.Max.Pics,tab$Ampl.Max.Pics,df$Frq,mesure)
+  while (tmp1 != tmp2 ) {
+    tab1=fauxPics_points(tab1$Frq.Max.Pics,tab1$Ampl.Max.Pics,df$Frq,mesure)
+    tmp1 <- length(tab1[,1])
+    tab2=fauxPics_points(tab1$Frq.Max.Pics,tab1$Ampl.Max.Pics,df$Frq,mesure)
+    tmp2 <- length(tab2[,1])
+  }
+  return(tab1)
+}
+
+
+```
+
+#Fonction récuparation de n pics
+
+```{r}
+
+
+recup_nb_max <- function(n,df_pic){
+  frq <- c()
+  ampl <- c()
+  print(df_pic)
+  if( n <= length(df_pic[,1]) ){ 
+    for (i in 1:n) {
+      ampl[i] <- max(df_pic$Ampl.Max.Pics)
+      indx_max <- which(ampl[i] == df_pic$Ampl.Max.Pics)
+      frq[i] <- df_pic$Frq.Max.Pics[indx_max]
+      df_pic$Frq.Max.Pics[indx_max] <- NA
+      df_pic$Ampl.Max.Pics[indx_max] <- NA
+      df_pic <- na.omit(df_pic)
+    
+    
+    }
+    n_pics <- data.frame("Frq Max Pics"= frq,"Ampl Max Pics"=ampl)
+    n_pics <- n_pics %>% arrange(n_pics$Frq.Max.Pics)  
+    return(n_pics)
+  }  
+ return(df_pic)
+}
+
+
+```
+
+#Fonction multiplie les recherches pics par intervalles (utilise toute les fonctions précèdentes)
+
+```{r}
+
+
+
+multi_recherche_max_local <- function(df,start,pas,mesure,seuil){
+  df_pics <- data.frame("Frq Max Pics" = c() ,"Ampl Max Pics" = c() )
+  for(i in 1:length(pas)){
+   # print(i)
+    lst <- Rech_max_local(2000,pas[i],mesure,df$Frq)
+    df_max <-as.data.frame(lst[1]) 
+    #print(df_max)
+    df_intervalle <- as.data.frame(lst[2])  
+   # print("debut fonction multi recherche")
+    df_indx_max <- as.data.frame(lst[3])
+   # print(df_indx_max)
+     #print("fin fonction multi recherche")
+    
+    peaksRef <-fauxPics_intervalles(df_max,mesure,df_indx_max,pas[i])
+    peaksRef <- fauxpics_par_seuil(df,peaksRef,seuil)
+    peaksRef <- supprimeFauxPics(peaksRef,df,mesure)
+    df_pics =rbind(df_pics,peaksRef)
+    
+  } 
+  df_pics = df_pics %>% arrange(df_pics$Frq.Max.Pics)
+  doublons <- which(duplicated(df_pics$Frq.Max.Pics))
+  df_pics<-df_pics[-doublons,]
+  df_pics <- supprimeFauxPics(df_pics,df,mesure)
+  #df_pics <- clean_pic1(df_pics)
+  return(df_pics)
+}
+
+
+
+
+
+
+```
+
+#Fonction de selection de pics par région
+
+```{r}
+
+
+
+recup_region_pics <- function(data,low_frq,median_frq,hight_frq){  
+ 
+  ampl <- c()
+  frq <- c()
+  frq_low <- c()
+  frq_median <- c()
+  frq_hight <- c()
+  
+  
+  if(low_frq >= 1 && low_frq <= dim(data)[1] ){ 
+    tab_low <- data[which(data[,1] < 20000),]
+    nmax_low_ampl <-  tail(sort(tab_low[,2]),low_frq) # 
+    ampl <- append(ampl,nmax_low_ampl) 
+    for(i in 1:length(nmax_low_ampl)){ frq_low[i] <- tab_low[which(nmax_low_ampl[i] == tab_low[,2]),1]} 
+    frq <- append(frq,frq_low)
+
+    
+  }
+  if(median_frq >= 1 && median_frq <= dim(data)[1] ){
+    tab_median <- data[which(data[,1] > 20000 ),]
+    tab_median <- tab_median[which(tab_median[,1] < 60000 ),]
+    print(tab_median)
+    print("tab median")
+    if( dim(tab_median)[1] > median_frq){
+    nmax_median_ampl <- tail(sort(tab_median[,2]),median_frq) }
+    if( median_frq >dim(tab_median)[1] ){
+      nmax_median_ampl <- tail(sort(tab_median[,2]),dim(tab_median)[1]) }
+    ampl <- append(ampl,nmax_median_ampl)
+    for(i in 1:length(nmax_median_ampl)){ frq_median[i] <- tab_median[which(nmax_median_ampl[i] == tab_median[,2]),1]}
+    frq <- append(frq,frq_median)
+   
+  }
+
+  
+  
+  if(hight_frq >= 1 && hight_frq <= dim(data)[1] ){
+    tab_hight <- data[which(data[,1] > 60000 ),]
+    tab_hight <- tab_hight[which(tab_hight[,1] < 95000 ),]
+    nmax_hight_ampl <- tail(sort(tab_hight[,2]),hight_frq)
+    ampl <- append(ampl,nmax_hight_ampl)
+    for(i in 1:length(nmax_hight_ampl)){ frq_hight[i] <- tab_hight[which(nmax_hight_ampl[i] == data[,2]),1]} 
+    frq <- append(frq,frq_hight)
+
+  }
+  
+  
+  max_pics <- data.frame( Frq.Max.Pics = frq ,Ampl.Max.Pics = ampl )
+  return(max_pics)
+  
+}
+
+
+
+```
+
+# Affichage du data frame et du graphique des n pics
+
+```{r}
+max_pic <- multi_recherche_max_local(df_corriger,start,tmp,df_corriger$AvgP,seuil) 
+vect_mot <- paste(rep("Pic",length(max_pic[,1])),as.character(c(1:length(max_pic[,1]))))
+max_pic <-cbind(vect_mot,max_pic)
+tab_npics <- recup_nb_max(n,max_pic)
+tab_npics
+```
+
+#Affichage graphique des n pics
+
+```{r}
+Graph_pic_ref(df_corriger,df_corriger$AvgP,tab_npics)
+```
+
+#Pour enregistre les résultat des pics trouvé sous un fichier xls
+
+```{r}
+
+if(!is.null(file_pics)){
+  write.table(tab_npics, file=file_pics, quote=TRUE,dec=",", row.names=FALSE, col.names=TRUE, sep ="\t", qmethod = c("escape"))
+} 
+
+```
+
+# Affichage du data frame et du graphique des n pics par région
+
+```{r}
+
+
+max_pic_region <- recup_region_pics(tab_npics,region_low ,region_median,region_hight)
+max_pic_region <- na.omit(max_pic_region)
+max_pic_region <- max_pic_region[order(max_pic_region$Frq.Max.Pics),]
+
+region_low;region_median;region_hight
+tab_npics
+max_pic_region
+```
+
+#Affichage graphique des n pics par région
+
+```{r}
+if(dim(max_pic_region )[1] !=0){
+  Graph_pic_ref(df_corriger,df_corriger$AvgP,max_pic_region )
+  
+}
+
+```
+
+#Pour enregistré les résultats des pics trouvé par région sous un fichier xls
+
+```{r}
+if(!is.null(file_region_pics)){
+  write.table(max_pic_region, file=file_region_pics, quote=TRUE,dec=",", row.names=FALSE, col.names=TRUE, sep ="\t", qmethod = c("escape"))
+} 
+
+```

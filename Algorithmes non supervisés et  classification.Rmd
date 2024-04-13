@@ -1,0 +1,395 @@
+---
+title: "Algorithmes non supervisées"
+output: html_document
+date: '2022-04-09'
+---
+
+## #Liste des fonctions et leurs explications.
+
+1.  **fviz_nbclust()** : détermine et visualise le nombre optimal de clusters à l'aide de différentes méthodes : somme des carrés des clusters , silhouette moyenne et statistiques d'écart.
+
+2.  **NbClust()** : Le package fournit 30 indices pour déterminer le nombre de clusters et propose d'utiliser le meilleur schéma de clustering à partir des différents résultats obtenus en faisant varier toutes les combinaisons de nombre de clusters, de mesures de distance et de méthodes de clustering.
+
+**Alogirthme de clustering :**
+
+-   **kmeans**(x = df , centers) avec x = data et centers le nombre de clustering souhaité.
+
+-    **HCPC** (Hierarchical Clustering on Principal Components) : Fonction PCA(df, ncpcs = "nombre de dimension réduite") puis appliquer HCPC (res.pca,nb.clust = "Nombre de clusters souhaité")
+
+-   **fcm**(df,centers = "nombre de clusters souhaité")
+
+**Algorithme de Corelation COR()** cette fonction renvoi deux graphiques de corrélation entre les variables deux à deux . Remarque : plus la dimension du fichier est grande plus l'interpretation est difficile .
+
+#Liste des différentes librairies à n'exécuter qu'une seule fois
+
+```{r}
+
+library(Rcpp)
+library(ppclust)
+library(factoextra)
+library(dplyr)
+library(cluster)
+library(fclust)
+library(ppclust)
+library(NbClust)          
+library("FactoMineR")
+library("kmed") 
+library(fpc) 
+library(dbscan)
+library(corrplot)
+```
+
+#Un exemple de comment doit être le fichier d'entrée.
+
+```{r pressure, echo=FALSE, fig.cap="A caption", out.width = '100%'}
+knitr::include_graphics("csv_parts.png")
+```
+
+#Lecture du fichier
+
+```{r}
+data <- read.csv2(file.choose(),sep=";" ,header = TRUE)
+
+df <- data[,-1]
+rownames(df) <- data[,1]
+
+
+```
+
+###################################################################################################################################################################################################### 
+
+                                                                                    
+
+::: {#overview .illustration key="1" style="color:red;font-weight: bold;"}
+**Variables globales : Cette section doit être paramètrée avant d'éxecuter le reste du programme !**
+:::
+
+**Variables globales**
+
+1.  **paramètre "nb_clust_kmeans"** défini comme le nombre de cluster pour la méthode k-mean
+
+2.  **paramètre "nb_clust_hcpc"** défini comme le nombre de cluster pour la méthode hcpc
+
+3.  **paramètre "nb_clust_fuzzy"** défini comme le nombre de cluster pour la méthode fuzzy
+
+4.  **paramètre "dim"** défini comme le nombre de dimension qu'on souhaite conservé dans l'analyse PCA de la section hcpc ( une réduction de dimension en d'autres termes)
+
+5.  **paramètre "file_data"** défini comme le chemin ou sera sauvegarder les résultats du clustering pour les 3 méthodes.
+
+```{r}
+nb_clust_kmeans = 3
+nb_clust_hcpc = 3
+nb_clust_fuzzy = 3  
+dim = 5
+file_data = "chemin/nom_fichier.xls" #attention il faut mettre des "/"
+
+```
+
+::: {.illustration key="1" style="color:red;font-weight: bold;"}
+**Fin de section !**
+:::
+
+# Méthode pour trouver le nombre de cluster pour la méthode Kmeans
+
+#Choix du nombre de clusters
+
+**Trois méthodes sont généralement employées :**
+
+1.  **Elbow method :** basée sur la minimisation de la somme des carrés des écarts à l'intérieur des clusters (SSwithin).
+
+2.  **Average silhouette method :** basée sur la maximisation du paramètre appelé "average silhouette".
+
+3.  **Gap statistic** method : basée sur la comparaison de la variation totale intra-cluster pour différentes valeurs de k avec leurs valeurs attendues sous une distribution de référence nulle des données.
+
+##### Résultat du nombre de cluster idéal pour le modèle $\color{red}{K-means}$ suivant 3 méthode différentes
+
+```{r}
+
+# Elbow method
+fviz_nbclust(df, kmeans, method = "wss") +
+    geom_vline(xintercept = 4, linetype = 2)+
+  labs(subtitle = "Elbow method optimal for Kmeans")
+
+# Silhouette method
+fviz_nbclust(df, kmeans, method = "silhouette")+
+  labs(subtitle = "Silhouette method optimal for Kmeans")
+
+
+# Gap statistic
+
+fviz_nbclust(df, kmeans, nstart = 25,  method = "gap_stat", nboot = 50,verbose = FALSE)+
+  labs(subtitle = "Gap statistic method optimal for Kmeans")
+
+```
+
+############################################################################################################################################################################################################################### 
+
+##### Résultat du nombre de cluster idéal pour le modèle $\color{red}{Fuzzy \;c-means}$ suivant 3 méthode différentes
+
+```{r}
+
+# Elbow method
+fviz_nbclust(df, cluster::pam, method = "wss") +
+    geom_vline(xintercept = 4, linetype = 2)+
+  labs(subtitle = "Elbow method optimal for pam")
+
+# Silhouette method
+fviz_nbclust(df, cluster::pam, method = "silhouette")+
+  labs(subtitle = "Silhouette method optimal for pam")
+
+
+# Gap statistic
+fviz_nbclust(df, cluster::pam, nstart = 25,  method = "gap_stat", nboot = 50,verbose = FALSE)+
+  labs(subtitle = "Gap statistic method optimal for pam")
+
+```
+
+##### Résultat du nombre de cluster idéal pour le modèle $\color{red}{HCPC}$ suivant 3 méthode différentes
+
+############################################################################################################################################################################################################################ 
+
+```{r}
+
+
+
+# Elbow method
+fviz_nbclust(df, hcut, method = "wss") +
+    geom_vline(xintercept = 4, linetype = 2)+
+  labs(subtitle = "Elbow method optimal for hcut")
+
+# Silhouette method
+fviz_nbclust(df, hcut, method = "silhouette")+
+  labs(subtitle = "Silhouette method optimal for hcut")
+
+
+# Gap statistic
+
+fviz_nbclust(df, hcut, nstart = 25,  method = "gap_stat", nboot = 50,verbose = FALSE)+
+  labs(subtitle = "Gap statistic method optimal for hcut")
+
+```
+
+####    
+
+####  Nombre de clusters ideal avec NbClust marche pour toute les modèles.
+
+###################################################################################################################################################################################################### 
+
+#Pour connaitre le nbr de cluster optimal , cette algorithme utilise différents algorithmes avec différentes méthodes et retourne un histogramme des réponses les plus sorties
+
+\
+**#Distance Euclidien**
+
+```{r}
+
+res.nbclust <- NbClust(df, distance = "euclidean",
+                  min.nc = 2, max.nc = 7, 
+                  method = "complete", index ="all")
+factoextra::fviz_nbclust(res.nbclust) + theme_minimal() + ggtitle("NbClust's optimal number of clusters for all method ")
+
+res.nbclust$All.index
+```
+
+**#Distance maximum**
+
+```{r}
+
+res.nbclust <- NbClust(df, distance = "maximum",
+                  min.nc = 2, max.nc = 7, 
+                  method = "complete", index ="all")
+factoextra::fviz_nbclust(res.nbclust) + theme_minimal() + ggtitle("NbClust's optimal number of clusters for all method/ distance = maximum ")
+```
+
+**#Distance Minkowski**
+
+```{r}
+
+res.nbclust <- NbClust(df, distance = "minkowski",
+                  min.nc = 2, max.nc = 7, 
+                  method = "complete", index ="all")
+factoextra::fviz_nbclust(res.nbclust) + theme_minimal() + ggtitle("NbClust's optimal number of clusters for all method / distance =minkowski ")
+
+```
+
+**#Distance Canberra**
+
+```{r}
+
+res.nbclust <- NbClust(df, distance = "canberra",
+                  min.nc = 2, max.nc = 7, 
+                  method = "complete", index ="all")
+factoextra::fviz_nbclust(res.nbclust) + theme_minimal() + ggtitle("NbClust's optimal number of clusters for all method / distance = canberra ")
+
+```
+
+**#Distance Manhatta**
+
+```{r}
+
+
+res.nbclust <- NbClust(df, distance = "manhattan",
+                  min.nc = 2, max.nc = 7, 
+                  method = "complete", index ="all")
+factoextra::fviz_nbclust(res.nbclust) + theme_minimal() + ggtitle("NbClust's optimal number of clusters for all method / distance = manhattan ")
+
+```
+
+########################################################################################################################################################################################################################### 
+
+###         #Algorithme Kmeans
+
+```{r}
+
+
+km.out1 = kmeans(df,centers=nb_clust_kmeans,nstart =100, algorithm = "Hartigan-Wong") #center = nbr de clusters 
+
+#Affichage graphique
+fviz_cluster(km.out1, df, ellipse.type = "norm",main = " kmeans :  algorithm = Hartigan-Wong") 
+
+```
+
+##### Crée un data frame contenant les pièces et leur affectation à un cluster
+
+```{r}
+frame_cluster_kmeans <- data.frame("Part" = rownames(df), "Cluster k-means" = km.out1$cluster )
+frame_cluster_kmeans
+
+```
+
+###         #Algorithme HCPC
+
+#################################################################################################################################################################################################################### 
+
+```{r}
+#Etape 1 : réduction dimensionelle
+# 1. ACP 
+res.pca <- PCA(df, ncp = dim, graph = TRUE) # ncp nombre de dimensions conservées dans les résultats finaux.
+
+# Etape 2 : Application HCPC
+# 2. HCPC
+res.hcpc <- HCPC(res.pca,nb.clust=nb_clust_hcpc,metric="euclidian")
+
+
+```
+
+# Crée un data frame contenant les pièces et leurs affectations à un cluster
+
+```{r}
+
+frame_cluster_hcpc <- data.frame("Part" = rownames(df), "Cluster HCPC" = res.hcpc$data.clust$clust )
+frame_cluster_hcpc
+
+```
+
+```{r}
+
+# graphe 3D d'un point de vue différent : 
+plot(res.hcpc, axes=c(1,2), choice="3D.map", rect=TRUE, 
+  draw.tree=TRUE, ind.names=TRUE, t.level="all", title=NULL,
+  new.plot=FALSE, max.plot=15, tree.barplot=TRUE,
+  centers.plot=FALSE,)
+```
+
+#Visualisation des résultats du clustering par la méthode HCPC (Hierarchical Clustering on Principal Components)
+
+```{r}
+
+# graphe 3D d'un point de vue différent : 
+plot(res.hcpc, axes=c(1,2), choice="3D.map", rect=TRUE, 
+  draw.tree=TRUE, ind.names=TRUE, t.level="all", title=NULL,
+  new.plot=FALSE, max.plot=15, tree.barplot=TRUE,
+  centers.plot=FALSE,)
+```
+
+```{r}
+fviz_dend(res.hcpc, 
+          cex = 0.7,                     # Taille du text
+          palette = "jco",               # Palette de couleur ?ggpubr::ggpar
+          rect = TRUE, rect_fill = TRUE, # Rectangle autour des groupes
+          rect_border = "jco",           # Couleur du rectangle
+          labels_track_height = 0.8      # Augment l'espace pour le texte
+          )
+```
+
+```{r}
+fviz_cluster(res.hcpc,
+             repel = TRUE,            # Evite le chevauchement des textes
+             show.clust.cent = TRUE, # Montre le centre des clusters
+             palette = "jco",         # Palette de couleurs, voir ?ggpubr::ggpar
+             ggtheme = theme_minimal(),
+             main = "Factor map for metric euclidean (HCPC) "
+             )
+```
+
+###################################################################################################################################################################################################### 
+
+###         #Algorithme  de corrélation (n'est liée à aucun modèle)
+
+#Facultatif
+
+#Affiche la corrélation entre les pics
+
+```{r}
+
+cor_data = cor(sapply(df,as.numeric), y = NULL, use = "everything",method =  "kendall")
+par(c(1,2))
+corrplot(cor_data, method="circle")
+corrplot(cor_data, method="number")
+```
+
+#################################################################################################################################################################################################################### 
+
+#################################################################################################################################################################################################################### 
+
+###       #Algorithme  Fuzzy c-means
+
+#Algorithme Fuzzy c means R #Ref : <https://rpubs.com/rahulSaha/Fuzzy-CMeansClustering> #Contrairement à l'algorithme K-means dans lequel chaque objet de données est le membre d'un seul cluster, un objet de données est le membre de tous les clusters avec des degrés variables d'appartenance floue entre 0 et 1 dans FCM. Par conséquent, les objets de données plus proches des centres des clusters ont des degrés d'appartenance plus élevés que les objets dispersés aux frontières des clusters.
+
+```{r}
+
+#get.dmetrics(dmt="all") #liste des distances utilisable
+
+res.fcm <- fcm(df, centers=nb_clust_fuzzy,nstart=25,dmetric="euclidean")
+res.fcm$cluster
+
+
+```
+
+#Affichage 1 résultat clustering fuzzy c-means
+
+```{r}
+res.fcm2 <- ppclust2(res.fcm, "kmeans")
+fviz_cluster(res.fcm2, data = data[,-1], 
+  ellipse.type = "convex",
+  palette = "jco",
+  repel = TRUE,main=" Fuzzy c means  Anis TANICH")
+```
+
+#Affichage 2 résultat clustering fuzzy c-means
+
+```{r}
+res.fcm3 <- ppclust2(res.fcm, "fanny")
+
+cluster::clusplot(scale(data[,-1]), res.fcm3$cluster,  
+  main = "Cluster plot of part data set",
+  color=TRUE, labels = 2, lines = 2, cex=1)
+```
+
+#Tableau contenant les pièces sur la 1er colonne et leurs affiliation à un cluster dans la seconde colonne
+
+```{r}
+frame_cluster_fuzzy <- data.frame("Part" = rownames(df), "Cluster Fuzzy" = res.fcm$cluster )
+frame_cluster_fuzzy
+
+```
+
+### Renvoi un data frame contenant l'affiliation de toute les méthodes #Attention dans la fonction write.table , le chemin doit être changer.
+
+```{r}
+
+
+cluster_ideal_all_method <- data.frame( Part = name_part, Cluster_Kmeans= frame_cluster_kmeans$Cluster.k.means ,Cluster_HCPC = frame_cluster_hcpc$Cluster,Cluster_fuzzy = frame_cluster_fuzzy$Cluster.Fuzzy )
+
+write.table(cluster_ideal_all_method, file=file_data, quote=TRUE, dec=",", row.names=FALSE, col.names=TRUE, sep ="\t", qmethod = c("escape"))
+
+```

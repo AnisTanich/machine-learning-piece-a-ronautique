@@ -1,0 +1,399 @@
+---
+title: "cross validations"
+author: "Anis Tanich"
+date: '2022-08-04'
+output: html_document
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+# Protocole 
+
+**Etape 1 : selection du fichier** ( soit un fichier contenant les pics
+ou soit un fichier contenant les amplitudes) , voir les images
+ci-dessous pour savoir le modèle de fichier à mettre en entrée
+
+=\> il faut éxecuter qu'un seul des algorithmes (choix 1 ou choix 2)
+
+E**tape 2 : On rentre les paramètres des variables globales**
+
+**#Etape 3 : Algorithme cross-validation** #Ce fichier implémente la
+méthode de cross-validation. **#Définition cross validation** : On
+effectue d'abord une séparation de l'ensemble de données de façon
+aléatoire en K folds. Un paramétrage unique dénommé « **K** » est inséré
+dans la procédure, se référant au nombre de groupe dans lequel
+l'échantillon sera réparti. K doit avoir une valeur ni trop basse ni
+trop haute. La plupart du temps, on choisira une valeur qui se situe
+entre 5 et 10 selon la taille du dataset. Dans le cas où K=10, cela
+implique qu'il faut diviser le dataset en 10 parties.
+
+Plus la valeur K est élevée, moins le modèle risque d'être biaisé. Sans
+oublier qu'une variance trop large peut amener à un surajustement. Avec
+une valeur plus basse, l'approche rejoint simplement la méthode
+Train-Test Split.
+
+L'ajustement du modèle est réalisé avec les folds K-1 (K moins 1), puis
+le modèle est validé en utilisant le K-fold restant. Tous les scores
+ainsi que les erreurs doivent être notés. On répète le même processus
+jusqu'à ce que tous les K-fold servent dans l'ensemble d'entraînement.
+On calcule ensuite la moyenne des scores enregistrés qui représente la
+métrique de performance du modèle.
+
+#Algorithme cross-validation renvoi **5 data frame** :
+
+-   renvoi l'accuracy pour les k-ensemble de validation pour chaque
+    modèle
+
+-    renvoi la sensibilité pour les k-ensemble de validation pour chaque
+    modèle
+
+-   renvoi le data frame correspondent aux etiquettes réel des ensemble
+    de validation
+
+-    renvoi le data frame correspondent aux prédiction du modèle bayes
+    pour les k-ensemble test
+
+-    renvoi le data frame correspondent aux prédiction du modèle svm
+    radial pour les k-ensemble test
+
+=\> Les 3 derniers data frame servent pour le dernier algorithme pour
+les matrices de confusion pour le modèle svm radial et naives bayes
+
+**#Etape 4 : Deux algorithmes** , le premier pour l'affichage graphique
+des matrices de confusion pour le modèle naive bayes puis le second pour
+le modèle svm radial
+
+```{r}
+library(e1071)
+library(mltools)
+library(ROCR)
+library(rpart)
+library(caret)
+library(class)
+library(cvms)
+library(broom)    
+library(tibble)   
+library(ggimage)   
+library(rsvg) 
+library(yardstick)
+library(ggplot2)
+library(ggnewscale)
+```
+
+############################################################################################################################################################################################################################# 
+
+#Un exemple de comment doit être le fichier d'entrée si les entrées sont
+les spectres
+
+```{r pressure, echo=FALSE, fig.cap="A caption", out.width = '100%'}
+knitr::include_graphics("csv_spectra_parts.png")
+```
+
+\#**Choix 1** : Si le fichier contient les amplitudes (spectre)
+
+```{r}
+df_parts <- read.csv2(file.choose(),sep=";", header = TRUE) 
+
+df <- as.data.frame(t(df)) #Applique la transposé pour avoir les pièces/données en lignes
+df
+```
+
+#Un exemple de comment doit être le fichier d'entrée si les entrées sont
+les pics
+
+```{r pressure, echo=FALSE, fig.cap="A caption", out.width = '100%'}
+knitr::include_graphics("csv_parts.png")
+```
+
+#Si le fichier contient les pics (utiliser cette algorithme)
+
+\#**Choix 2** :Si le fichier contient les amplitudes (pics)
+
+```{r}
+df_parts <- read.csv2(file.choose(),sep=";", header = TRUE) 
+
+df <- df_parts[,-1]
+rownames(df) <- df_parts[,1]
+
+df
+```
+
+#Etape 2
+
+::: {#overview .illustration key="1" style="color:red;font-weight: bold;"}
+**Variables globales : Cette section doit être paramètrée avant
+d'éxecuter le reste du programme !**
+:::
+
+**Variables globales**
+
+1.  **paramètre "k"** spécifie le nombre de plis à appliquer pour la
+    cross-validation (le k de k-fold)
+
+    exemple pour k = 4 on aura un set train à 75% et un set test à 25%
+
+2.  **paramètre "deg_svm_poly"** défini le degrés du polynome pour le
+    modèle svm à noyau polynomial
+
+3.  **paramètre "Y"** Y est un vecteur contenant les étiquettes de
+    chaque donnée (1 correspond à une pièce conforme et 0 une pièce non
+    conforme)
+
+4.  **paramètre "file_data"** défini comme le chemin ou sera sauvegarder
+    les résultats du clustering pour les 3 méthodes.
+
+```{r}
+k = 4
+deg_svm_poly = 5 # Pour une analyse sur les spectres utilisé un degré de 50
+Y = c(1,0,1,0,1,0,1,0) #ici Y à 8 valeurs donc l'étiquettes de 8 pièces ( à modifier selon l'usage)
+file_data = "chemin/nom_fichier.xls" #attention il faut mettre des "/"
+
+```
+
+::: {.illustration key="1" style="color:red;font-weight: bold;"}
+**Fin de section !**
+:::
+
+#################################################################################################################################################################################################################### 
+
+```{r}
+
+df <- rbind(df,label = as.factor(Y))
+```
+
+###  Algorithme de cross validation
+
+#3eme Etape
+
+```{r}
+validation_croise_all_method <- function(data,kfold,deg_poly){
+  
+        #Erreur MSE
+        erreur_svm_lin <-  c() 
+        erreur_svm_radial <- c() 
+        erreur_svm_sigmoid <-c()
+        erreur_svm_poly <- c()
+        erreur_arbre <-   c()
+        erreur_pred1_knn  <- c()
+        erreur_pred2_knn  <- c()
+        erreur_pred3_knn  <- c()
+        erreur_bayes  <-c()
+  
+        # Sensitivity
+         sensi_lin <- c() 
+         sensi_sigmoid <- c() 
+         sensi_arbre <- c() 
+         sensi_poly <- c() 
+         sensi_radial <- c() 
+         sensi_knn1 <- c() 
+         sensi_knn2 <- c() 
+         sensi_knn3 <- c() 
+         sensi_bayes <- c() 
+         
+         #Nombre de part dans l'ensemble de validation
+         k <- trunc(length(rownames(data))/kfold)
+          
+        #Enregistrement des Ytest pour la matrice de confusion
+         mat_ytest <- matrix(nrow = kfold , ncol = k)
+         mat_bayes <- matrix(nrow = kfold , ncol = k)
+         mat_svm_radia <- matrix(nrow = kfold , ncol = k)
+  
+    if( kfold >= 2 && kfold <= length(rownames(data))){
+        
+
+        
+      for(i in 1:kfold){
+        Xtrain <- data[-((k*(i-1)+1):(k*i)),-length(colnames(data))] 
+        Ytrain <- data[-((k*(i-1)+1):(k*i)),length(colnames(data))]
+        Xtest <- data[(k*(i-1)+1):(k*i),-length(colnames(data))]
+        Ytest <- data[(k*(i-1)+1):(k*i),length(colnames(data))]  
+        if(length(which(Ytest== 0)) < 2){ # Je verifie si Y test contient 2 outliers
+      
+           var1 <- which(Ytrain==0)[1]  #Je recupère l'indice d'un outlier
+           var2 <- which(Ytest==1)[1]   # je recupère l'indice d'un inlier
+           
+           tmp1 <- Xtrain[var1,]  #Je save les features de l'outlier dans une variable temporaire
+           tmp2 <-Xtest[var2,]    #Je save les features de l'inliers dans une variable temporaire  
+           
+           Xtrain[var1,] <- tmp2 # Je switch l'outlier en inlier
+           Xtest[var2,] <- tmp1 # Je switch l'inlier en outlier  
+           Ytrain[var1] <- 1 #switch etiquette
+           Ytest[var2] <- 0   #switch etiquette
+           
+          
+        }
+        
+        model_kernel_polynomial <- svm(as.factor(Ytrain) ~ ., data = Xtrain,kernel ="polynomial",degree= deg_poly) 
+     
+        model_kernel_radial = svm(as.factor(Ytrain) ~ ., data =Xtrain,kernel ="radial")
+  
+        model_kernel_sigmoid = svm(as.factor(Ytrain) ~ ., data = Xtrain,kernel ="sigmoid")
+     
+        model_kernel_linear = svm(as.factor(Ytrain) ~ ., data = Xtrain,kernel ="linear")
+                
+                
+        #modèle arbre de dé&cision
+      
+        model_arbre <-rpart(Ytrain ~ ., data = Xtrain, method = "class") 
+                
+        #modèle  Bayes naif
+   
+        model_bayes <-naiveBayes(Ytrain ~ ., data = Xtrain,laplace = 0) 
+
+
+        #prédictions SVM
+        
+        pred_kernel_polynomial <- predict(model_kernel_polynomial, newdata = Xtest)
+        pred_kernel_radial <- predict(model_kernel_radial, newdata = Xtest) 
+        pred_kernel_sigmoid <- predict(model_kernel_sigmoid, newdata = Xtest) 
+        pred_kernel_linear <- predict(model_kernel_linear, newdata = Xtest) 
+        
+        
+        # prédictions Arbre de décision
+     
+        pred_arbre <- predict(model_arbre, newdata = Xtest,type = "class")
+       
+        #prédiction K-nn
+        
+        pred1_knn <- knn(train = Xtrain, test = Xtest,cl = Ytrain, k=trunc(0.25*dim(Xtrain)[1])) #25% de voisins
+        pred2_knn <- knn(train = Xtrain, test = Xtest,cl = Ytrain, k=trunc(0.50*dim(Xtrain)[1])) #50% de voisins
+        pred3_knn <- knn(train = Xtrain, test = Xtest,cl = Ytrain, k=trunc(0.75*dim(Xtrain)[1])) #75% de voisins
+
+    
+        
+        #Prédiction 
+        
+        pred_bayes <- predict(model_bayes, newdata = Xtest)
+         
+
+        #MSE
+        
+        erreur_svm_lin[i] <-  mse(preds = as.numeric(as.matrix(pred_kernel_linear)) ,actuals = as.numeric(as.matrix(Ytest)),weights = 1, na.rm = FALSE ) 
+        erreur_svm_radial[i] <- mse(preds = as.numeric(as.matrix( pred_kernel_radial)) ,actuals = as.numeric(as.matrix(Ytest)),weights = 1, na.rm = FALSE ) 
+        erreur_svm_sigmoid[i] <-mse(preds = as.numeric(as.matrix(pred_kernel_sigmoid)) ,actuals = as.numeric(as.matrix(Ytest)),weights = 1, na.rm = FALSE ) 
+        erreur_svm_poly[i] <- mse(preds = as.numeric(as.matrix(pred_kernel_polynomial)) ,actuals = as.numeric(as.matrix(Ytest)),weights = 1, na.rm = FALSE )
+        erreur_arbre[i] <-   mse(preds = as.numeric(as.matrix(pred_arbre)) ,actuals = as.numeric(as.matrix(Ytest)),weights = 1, na.rm = FALSE )
+        erreur_pred1_knn[i]  <-   mse(preds = as.numeric(as.matrix(pred1_knn)) ,actuals = as.numeric(as.matrix(Ytest)),weights = 1, na.rm = FALSE )
+        erreur_pred2_knn[i]  <-   mse(preds = as.numeric(as.matrix(pred2_knn)) ,actuals = as.numeric(as.matrix(Ytest)),weights = 1, na.rm = FALSE )
+        erreur_pred3_knn[i]  <-   mse(preds = as.numeric(as.matrix(pred3_knn)) ,actuals = as.numeric(as.matrix(Ytest)),weights = 1, na.rm = FALSE )
+        erreur_bayes[i]  <-   mse(preds = as.numeric(as.matrix(pred_bayes)) ,actuals = as.numeric(as.matrix(Ytest)),weights = 1, na.rm = FALSE )
+        
+        #Sensitivity
+         sensi_lin[i] <- caret::sensitivity(factor(as.matrix(pred_kernel_linear),levels = 0:1),factor(as.matrix(Ytest),levels = 0:1))
+         sensi_sigmoid[i] <- caret::sensitivity(factor(as.matrix(pred_kernel_sigmoid),levels = 0:1),factor(as.matrix(Ytest),levels = 0:1))
+         sensi_arbre[i] <- caret::sensitivity(factor(as.matrix(pred_arbre),levels = 0:1),factor(as.matrix(Ytest),levels = 0:1))
+         sensi_poly[i] <- caret::sensitivity(factor(as.matrix(pred_kernel_polynomial),levels = 0:1),factor(as.matrix(Ytest),levels = 0:1))
+         sensi_radial[i] <- caret::sensitivity(factor(as.matrix(pred_kernel_radial),levels = 0:1),factor(as.matrix(Ytest),levels = 0:1))
+         sensi_knn1[i] <- caret::sensitivity(factor(as.matrix(pred1_knn),levels = 0:1),factor(as.matrix(Ytest),levels = 0:1))
+         sensi_knn2[i] <- caret::sensitivity(factor(as.matrix(pred2_knn),levels = 0:1),factor(as.matrix(Ytest),levels = 0:1))
+         sensi_knn3[i] <- caret::sensitivity(factor(as.matrix(pred3_knn),levels = 0:1),factor(as.matrix(Ytest),levels = 0:1))
+         sensi_bayes[i] <- caret::sensitivity(factor(as.matrix(pred_bayes),levels = 0:1),factor(as.matrix(Ytest),levels = 0:1))
+        
+         
+        #Prediction save
+         mat_ytest[i,] <- as.numeric(as.matrix(Ytest))
+         mat_bayes[i,] <- as.numeric(as.matrix(pred_bayes))
+         mat_svm_radia[i,] <- as.numeric(as.matrix(pred_kernel_radial))
+                 
+         
+         
+        
+      }
+      
+      result <- data.frame(ACC_svm_lin = 1-erreur_svm_lin ,ACC_svm_radial = 1-erreur_svm_radial,ACC_svm_poly = 1-erreur_svm_poly ,ACC_svm_sigmoid = 1-erreur_svm_sigmoid ,ACC_arbre = 1-erreur_arbre , ACC_pred1_knn = 1-erreur_pred1_knn ,ACC_pred2_knn =  1-erreur_pred2_knn ,ACC_pred3_knn = 1-erreur_pred3_knn,ACC_bayes = 1-erreur_bayes )
+            
+      result_sensi <- data.frame(sensi_svm_lin = sensi_lin,sensi_svm_radial = sensi_radial,sensi_svm_poly = sensi_poly,sensi_svm_sigmoid = sensi_sigmoid,sensi_knn1 = sensi_knn1,sensi_knn2=sensi_knn2,sensi_knn3 = sensi_knn3,sensi_arbre = sensi_arbre,sensi_bayes=sensi_bayes)
+      lst <- list(result,result_sensi,as.data.frame(mat_ytest),as.data.frame(mat_bayes),as.data.frame(mat_svm_radia))
+    }
+  
+  return(lst)
+}
+
+
+
+
+result <- validation_croise_all_method(df[sample(1:dim(df)[1],size = dim(df)[1],replace = FALSE),],kfold = k,deg_poly = deg_svm_poly)
+result
+```
+
+############################################################################################################################################################################################################################ 
+
+###          Sauvegarde des data frame accuracy et sensibilité 
+
+```{r}
+write.table(result[1] , file=file_data, quote=TRUE,
+ dec=",", row.names=FALSE, col.names=TRUE, sep ="\t", qmethod = c("escape"))
+
+write.table(result[2] , file=file_data, quote=TRUE,
+ dec=",", row.names=FALSE, col.names=TRUE, sep ="\t", qmethod = c("escape"))
+
+```
+
+#4eme Etape :
+
+### Affichage graphique des matrices de confusion pour le modèle bayes
+
+############################################################################################################################################################################################################################ 
+
+```{r}
+
+# Ici kfold doit être le même kfold que dans la fonction de cross validation pour generer les matrice de confusion
+kfold <- k
+
+table_Ytest <- as.data.frame(result[3])
+table_pred_bayes <- as.data.frame(result[4])
+table_pred_svm_radial <- as.data.frame(result[5])
+
+
+for( i in 1:kfold){
+  set.seed(1)
+  d_multi <- tibble("Reality" = factor(as.matrix(table_Ytest[i,]),levels = 0:1),"prediction" = factor(as.matrix(table_pred_bayes[i,]),levels = 0:1))
+  conf_mat <- confusion_matrix(targets = d_multi$Reality,predictions = d_multi$prediction)
+  
+ 
+ print(plot_confusion_matrix(
+    conf_mat$`Confusion Matrix`[[1]],
+    add_sums = TRUE,
+    sums_settings = sum_tile_settings(
+      palette = "Oranges",
+      label = "Total",
+      tc_tile_border_color = "black", tile_border_size = 3
+    )
+  ))
+
+}
+
+
+```
+
+### Affichage graphique des matrices de confusion pour le modèle svm à noyau radial
+
+############################################################################################################################################################################################################################ 
+
+```{r}
+
+# Ici kfold doit être le même kfold que dans la fonction de cross validation pour generer les matrice de confusion
+kfold <- k
+
+
+for( i in 1:kfold){
+  set.seed(1)
+  d_multi <- tibble("Reality" = factor(as.matrix(table_Ytest[i,]),levels = 0:1),"prediction" = factor(as.matrix(table_pred_svm_radial[i,]),levels = 0:1))
+  conf_mat <- confusion_matrix(targets = d_multi$Reality,predictions = d_multi$prediction)
+  
+ 
+ print(plot_confusion_matrix(
+    conf_mat$`Confusion Matrix`[[1]],
+    add_sums = TRUE,
+    sums_settings = sum_tile_settings(
+      palette = "Oranges",
+      label = "Total",
+      tc_tile_border_color = "black", tile_border_size = 3
+    )
+  ))
+
+}
+
+
+```
